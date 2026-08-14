@@ -1,0 +1,857 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<title>Nachkomma — was in einer Fließkommazahl wirklich steht</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="description" content="IEEE 754 zum Anfassen: Bitfeld, exakte Dezimalentwicklung per BigInt, die Dichte der darstellbaren Zahlen und ein Messgerät für Summationsfehler — im Browser, ohne Bibliothek." />
+
+<style>
+  :root {
+    --grund: #F2F4F7;
+    --feld:  #FFFFFF;
+    --tief:  #E4E8EE;
+    --linie: #C3CBD6;
+    --tinte: #10151C;
+    --leise: #626F80;
+    --eins:  #C2760B;
+    --null:  #A9B4C2;
+    --akzent:#0E7490;
+    --warn:  #B3261E;
+    --vz:    #7C3AED;
+    --exp:   #0E7490;
+    --man:   #C2760B;
+    --schatten: 0 1px 0 rgba(16,21,28,.05), 0 10px 24px -16px rgba(16,21,28,.45);
+    --f-fest: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, "DejaVu Sans Mono", monospace;
+    --f-text: -apple-system, "Segoe UI Variable Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --grund: #0E1116; --feld: #151A21; --tief: #0A0D12; --linie: #253040;
+      --tinte: #D8E0EA; --leise: #7A8899; --eins: #E8A33D; --null: #3A4757;
+      --akzent: #4FC3D9; --warn: #E0695E;
+      --vz: #A78BFA; --exp: #4FC3D9; --man: #E8A33D;
+      --schatten: 0 1px 0 rgba(255,255,255,.03), 0 12px 30px -18px #000;
+    }
+  }
+  :root[data-theme="dark"] {
+    --grund: #0E1116; --feld: #151A21; --tief: #0A0D12; --linie: #253040;
+    --tinte: #D8E0EA; --leise: #7A8899; --eins: #E8A33D; --null: #3A4757;
+    --akzent: #4FC3D9; --warn: #E0695E;
+    --vz: #A78BFA; --exp: #4FC3D9; --man: #E8A33D;
+    --schatten: 0 1px 0 rgba(255,255,255,.03), 0 12px 30px -18px #000;
+  }
+
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--grund); color:var(--tinte);
+    font-family:var(--f-text); font-size:15px; line-height:1.55; -webkit-font-smoothing:antialiased; }
+  .blatt { max-width:1180px; margin:0 auto;
+    padding: clamp(20px,4vw,44px) clamp(14px,3vw,28px) 64px;
+    display:flex; flex-direction:column; gap:18px; }
+
+  .marke { font-family:var(--f-fest); font-size:10px; letter-spacing:.2em; text-transform:uppercase;
+    color:var(--leise); display:flex; gap:12px; align-items:center; margin:0; }
+  .marke::after { content:""; flex:1; height:1px; background:var(--linie); }
+  h1 { font-family:var(--f-fest); font-weight:700; font-size:clamp(24px,4.2vw,40px);
+    line-height:1.06; letter-spacing:-.03em; margin:0; text-wrap:balance; }
+  h1 span { color:var(--eins); }
+  .vorspann { max-width:72ch; color:var(--leise); margin:0; }
+  .vorspann b { color:var(--tinte); font-weight:600; }
+
+  .leiste { display:flex; gap:8px; flex-wrap:wrap; align-items:center;
+    background:var(--feld); border:1px solid var(--linie); padding:9px 11px; box-shadow:var(--schatten); }
+  .kl { font-family:var(--f-fest); font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--leise); }
+  button, select, input { font-family:var(--f-fest); font-size:12px; color:var(--tinte); background:var(--grund);
+    border:1px solid var(--linie); border-radius:0; padding:6px 10px; letter-spacing:.03em; }
+  button, select { cursor:pointer; }
+  button:hover, select:hover { border-color:var(--akzent); }
+  button:active { background:var(--tief); }
+  button:disabled { opacity:.45; cursor:default; }
+  button.haupt { background:var(--akzent); border-color:var(--akzent); color:var(--feld); }
+  button.haupt:hover { filter:brightness(1.1); }
+  input[type=text] { background:var(--tief); min-width:210px; }
+  :focus-visible { outline:2px solid var(--akzent); outline-offset:2px; }
+
+  .kasten { background:var(--feld); border:1px solid var(--linie); box-shadow:var(--schatten);
+    display:flex; flex-direction:column; min-width:0; }
+  .kasten-kopf { display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+    padding:8px 11px; border-bottom:1px solid var(--linie); }
+  .kasten-leib { padding:11px; display:flex; flex-direction:column; gap:10px; min-width:0; }
+  .buehne { display:grid; grid-template-columns: 1fr 1fr; gap:18px; align-items:start; }
+  @media (max-width: 980px) { .buehne { grid-template-columns: minmax(0,1fr); } }
+
+  /* Bitfeld */
+  .bitreihe { display:flex; flex-wrap:wrap; gap:1px; }
+  .bit { width:15px; height:28px; display:flex; align-items:center; justify-content:center;
+    font-family:var(--f-fest); font-size:11px; cursor:pointer; user-select:none;
+    background:var(--tief); border:1px solid var(--linie); color:var(--null); }
+  /* Vorzeichen, Exponent und Mantisse durch eine Lücke trennen */
+  .bit[data-i="62"], .bit[data-i="51"] { margin-left:7px; }
+  @media (max-width: 720px) { .bit { width:13px; height:24px; font-size:10px; } }
+  .bit.ein { color:var(--feld); }
+  .bit.vz.ein  { background:var(--vz);  border-color:var(--vz); }
+  .bit.exp.ein { background:var(--exp); border-color:var(--exp); }
+  .bit.man.ein { background:var(--man); border-color:var(--man); }
+  .bit.vz  { border-bottom:3px solid var(--vz); }
+  .bit.exp { border-bottom:3px solid var(--exp); }
+  .bit.man { border-bottom:3px solid var(--man); }
+  .bit:hover { outline:2px solid var(--akzent); outline-offset:-2px; }
+  .felder { display:flex; gap:14px; flex-wrap:wrap; font-family:var(--f-fest); font-size:11px; color:var(--leise); }
+  .felder b { font-weight:600; }
+  .fv { color:var(--vz); } .fe { color:var(--exp); } .fm { color:var(--man); }
+
+  .werte { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:1px;
+    background:var(--linie); border:1px solid var(--linie); }
+  .wert { background:var(--feld); padding:7px 9px; min-width:0; }
+  .wert .l { font-family:var(--f-fest); font-size:9.5px; letter-spacing:.13em;
+    text-transform:uppercase; color:var(--leise); }
+  .wert .n { font-family:var(--f-fest); font-size:15px; font-variant-numeric:tabular-nums;
+    overflow-wrap:anywhere; }
+
+  .exakt { font-family:var(--f-fest); font-size:12.5px; line-height:1.6; background:var(--tief);
+    border:1px solid var(--linie); padding:10px; overflow-wrap:anywhere; }
+  .exakt .rest { color:var(--warn); }
+  .exakt .gleich { color:var(--akzent); }
+
+  canvas { width:100%; height:auto; display:block; background:var(--tief); border:1px solid var(--linie); }
+
+  table.liste { border-collapse:collapse; width:100%; font-family:var(--f-fest); font-size:12px; }
+  table.liste th, table.liste td { border-bottom:1px solid var(--linie); padding:5px 7px; text-align:left; }
+  table.liste th { color:var(--leise); font-weight:400; font-size:10px; letter-spacing:.1em; text-transform:uppercase; }
+  table.liste td.z { text-align:right; font-variant-numeric:tabular-nums; }
+  .gut { color:var(--akzent); } .schlecht { color:var(--warn); }
+
+  .fortschritt { height:3px; background:var(--tief); border:1px solid var(--linie); }
+  .fortschritt i { display:block; height:100%; width:0; background:var(--akzent); transition:width .12s linear; }
+
+  .noten { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:18px; margin-top:6px; }
+  .noten section { background:var(--feld); border:1px solid var(--linie); padding:12px 14px; box-shadow:var(--schatten); }
+  .noten h3 { font-family:var(--f-fest); font-size:11px; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--leise); margin:0 0 6px; font-weight:400; }
+  .noten p { margin:0; font-size:14px; }
+  code { font-family:var(--f-fest); font-size:12.5px; background:var(--tief); padding:1px 4px; }
+  .fuss { color:var(--leise); font-size:13px; border-top:1px solid var(--linie); padding-top:12px; }
+  .fuss a { color:var(--akzent); }
+</style>
+</head>
+<body>
+<main class="blatt">
+
+  <p class="marke">Blatt · Zahlen</p>
+  <h1>Nachkomma — was in einer <span>Fließkommazahl</span> wirklich steht</h1>
+  <p class="vorspann">
+    <code>0.1 + 0.2</code> ist nicht <code>0.3</code>, und das ist kein Fehler, sondern die
+    Bauart. Hier liegt die Zahl offen: <b>jedes Bit anklickbar</b>, daneben der
+    <b>exakte</b> Wert — nicht gerundet dargestellt, sondern mit BigInt vollständig
+    ausgerechnet. Dazu die Frage, die man selten gestellt bekommt: <b>wo genau sitzen die
+    darstellbaren Zahlen</b>, und was kostet es, viele davon zu addieren.
+  </p>
+
+  <div class="leiste">
+    <span class="kl">Zahl</span>
+    <input type="text" id="eingabe" value="0.1" spellcheck="false" aria-label="Zahl eingeben" />
+    <button id="b-setzen">Übernehmen</button>
+    <span class="kl" style="margin-left:8px">Vorlagen</span>
+    <select id="vorlagen" aria-label="Vorlage wählen">
+      <option value="0.1">0.1</option>
+      <option value="0.2">0.2</option>
+      <option value="0.30000000000000004">0.1 + 0.2</option>
+      <option value="0.3">0.3</option>
+      <option value="1">1</option>
+      <option value="0.5">0.5</option>
+      <option value="9007199254740993">2^53 + 1</option>
+      <option value="16777217">2^24 + 1</option>
+      <option value="1e-320">1e-320 (subnormal)</option>
+      <option value="5e-324">kleinste subnormale</option>
+      <option value="1.7976931348623157e308">größte endliche</option>
+      <option value="Infinity">Unendlich</option>
+      <option value="NaN">NaN</option>
+      <option value="-0">−0</option>
+    </select>
+    <button id="b-hoch" title="nächstgrößere darstellbare Zahl">Nachbar ▲</button>
+    <button id="b-runter" title="nächstkleinere darstellbare Zahl">Nachbar ▼</button>
+    <span style="flex:1"></span>
+    <button id="b-thema" title="hell oder dunkel">Ansicht</button>
+  </div>
+
+  <div class="kasten">
+    <div class="kasten-kopf">
+      <span class="kl">Die Zahl, Bit für Bit</span>
+      <span class="kl" id="deutung" style="margin-left:auto"></span>
+    </div>
+    <div class="kasten-leib">
+      <div class="bitreihe" id="bitfeld" aria-label="64 Bit der Zahl, anklickbar"></div>
+      <div class="felder">
+        <span><b class="fv">■</b> Vorzeichen · 1 Bit</span>
+        <span><b class="fe">■</b> Exponent · 11 Bit</span>
+        <span><b class="fm">■</b> Mantisse · 52 Bit</span>
+        <span id="felderwerte"></span>
+      </div>
+      <div class="werte">
+        <div class="wert"><div class="l">Wert</div><div class="n" id="w-wert">—</div></div>
+        <div class="wert"><div class="l">Vorzeichen · Exponent · Mantisse</div><div class="n" id="w-teile">—</div></div>
+        <div class="wert"><div class="l">als Bruch</div><div class="n" id="w-bruch">—</div></div>
+        <div class="wert"><div class="l">Abstand zum Nachbarn (ULP)</div><div class="n" id="w-ulp">—</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="kasten">
+    <div class="kasten-kopf">
+      <span class="kl">Der exakte Wert</span>
+      <span class="kl" id="exakt-lage" style="margin-left:auto"></span>
+    </div>
+    <div class="kasten-leib">
+      <div class="exakt" id="exakt">—</div>
+      <p class="kl" id="exakt-fuss" style="text-transform:none;letter-spacing:0;font-size:12px"></p>
+    </div>
+  </div>
+
+  <div class="kasten">
+    <div class="kasten-kopf">
+      <span class="kl">Wo die Zahlen sitzen</span>
+      <select id="karte-art" style="margin-left:auto" aria-label="Darstellung wählen">
+        <option value="dichte">Abstand je Größenordnung</option>
+        <option value="strahl">Nachbarn um die Zahl</option>
+      </select>
+    </div>
+    <div class="kasten-leib">
+      <canvas id="karte" width="1120" height="330" aria-label="Verteilung der darstellbaren Zahlen"></canvas>
+      <p class="kl" id="karte-fuss" style="text-transform:none;letter-spacing:0;font-size:12px"></p>
+    </div>
+  </div>
+
+  <div class="kasten">
+      <div class="kasten-kopf">
+        <span class="kl">Summieren</span>
+        <select id="sum-fall" style="margin-left:auto" aria-label="Summanden wählen">
+          <option value="zehntel">1 000 000 × 0.1</option>
+          <option value="harmonisch">1/1 + 1/2 + … + 1/1 000 000</option>
+          <option value="gross-klein">1e16 und 1 000 000 × 1</option>
+          <option value="wechsel">abwechselnd groß und klein</option>
+        </select>
+        <button id="b-summe" class="haupt">Rechnen</button>
+      </div>
+      <div class="kasten-leib">
+        <table class="liste" id="sum-tabelle">
+          <thead><tr><th>Verfahren</th><th>Ergebnis</th><th class="z">Fehler in ULP</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <p class="kl" id="sum-fuss" style="text-transform:none;letter-spacing:0;font-size:12px">
+          Der Vergleichswert ist keine bessere Fließkommazahl, sondern die mit BigInt exakt
+          gerechnete Summe.
+        </p>
+    </div>
+  </div>
+
+  <div class="kasten">
+    <div class="kasten-kopf">
+      <span class="kl">Beweis statt Behauptung</span>
+      <button id="b-pruefen" class="haupt" style="margin-left:auto">Prüfen</button>
+    </div>
+    <div class="kasten-leib">
+      <p style="margin:0;color:var(--leise);font-size:14px">
+        Die exakte Darstellung ist nur etwas wert, wenn sie stimmt. Geprüft wird deshalb gegen
+        das Verfahren selbst: jede ausgerechnete Dezimalzahl muss beim Zurücklesen dasselbe
+        Bitmuster ergeben, jeder Nachbar muss genau ein Bitmuster entfernt liegen, und die
+        exakte Summe muss mit der schrittweise aufaddierten Bruchsumme übereinstimmen.
+      </p>
+      <div class="fortschritt"><i id="pruef-balken"></i></div>
+      <table class="liste" id="pruef-tabelle"><tbody></tbody></table>
+      <p class="kl" id="pruef-fuss">noch nicht geprüft</p>
+    </div>
+  </div>
+
+  <div class="noten">
+    <section>
+      <h3>Warum 0.1 nicht 0.1 ist</h3>
+      <p>
+        Eine binäre Bruchzahl kann nur Summen von Zweierpotenzen darstellen. Ein Zehntel ist
+        im Zweiersystem periodisch — wie ein Drittel im Zehnersystem. Gespeichert wird
+        deshalb die nächstgelegene darstellbare Zahl, und die ist um rund
+        <code>5.55e-18</code> zu groß.
+      </p>
+    </section>
+    <section>
+      <h3>Warum die Abstände wachsen</h3>
+      <p>
+        Zwischen zwei Zweierpotenzen liegen immer gleich viele Zahlen: 2<sup>52</sup>. Nach oben
+        wird derselbe Vorrat über einen doppelt so langen Abschnitt verteilt — der Abstand
+        verdoppelt sich mit jeder Oktave. Ab 2<sup>53</sup> ist er größer als 1, und ganze
+        Zahlen fallen aus dem Raster.
+      </p>
+    </section>
+    <section>
+      <h3>Was hier gemessen wird</h3>
+      <p>
+        Der Fehler beim Summieren wird nicht geschätzt, sondern gegen die mit BigInt exakt
+        gerechnete Summe gestellt und in ULP angegeben — in Vielfachen des Abstands zum
+        Nachbarn. Das ist das einzige Maß, das über Größenordnungen hinweg vergleichbar bleibt.
+      </p>
+    </section>
+  </div>
+
+  <p class="fuss">
+    Eine einzelne HTML-Datei. Kein Build, keine Bibliothek, nichts verlässt den Browser.
+    Verwandt: Redundanz · Reparatur · Würfel · Rechenwerk · Plotterblätter.
+  </p>
+
+</main>
+
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const nf = new Intl.NumberFormat("de-DE");
+
+  /* ======================= Die Zahl und ihre Bits =======================
+     Ein Float64 ist kein Zahlenwert mit Kommastelle, sondern ein Bitmuster:
+     ein Vorzeichenbit, elf Exponentenbits, zweiundfünfzig Mantissenbits. Alles
+     Weitere folgt daraus — auch die Fehler. */
+
+  const puffer = new ArrayBuffer(8);
+  const sicht = new DataView(puffer);
+
+  function bitsVon(x) {
+    sicht.setFloat64(0, x);
+    return sicht.getBigUint64(0);
+  }
+  function zahlVon(b) {
+    sicht.setBigUint64(0, b & 0xFFFFFFFFFFFFFFFFn);
+    return sicht.getFloat64(0);
+  }
+
+  const VZ_MASKE  = 1n << 63n;
+  const EXP_MASKE = 0x7FFn << 52n;
+  const MAN_MASKE = (1n << 52n) - 1n;
+
+  function zerlegen(x) {
+    const b = bitsVon(x);
+    const vz  = (b & VZ_MASKE) ? 1 : 0;
+    const exp = Number((b & EXP_MASKE) >> 52n);
+    const man = b & MAN_MASKE;
+    return { bits: b, vz, exp, man };
+  }
+
+  // Der Wert als exakter Bruch: x = zaehler / 2^nenner2, beides exakt.
+  function alsBruch(x) {
+    const { vz, exp, man } = zerlegen(x);
+    if (exp === 0x7FF) return null;                      // Unendlich oder NaN
+    let m, e;
+    if (exp === 0) { m = man; e = -1074; }               // subnormal
+    else { m = man | (1n << 52n); e = exp - 1075; }      // normal: 1.mmm × 2^(exp-1023)
+    return { m, e, vz };                                  // Wert = (-1)^vz · m · 2^e
+  }
+
+  /* Exakte Dezimalentwicklung. Jede binäre Bruchzahl hat eine endliche
+     Dezimaldarstellung: m·2^-k = m·5^k / 10^k. Der Rest ist Stellenschieben —
+     und genau deshalb ist das Ergebnis nicht "genauer angezeigt", sondern
+     wirklich der Wert, der in den Bits steht. */
+  function exaktDezimal(x) {
+    const br = alsBruch(x);
+    if (!br) return null;
+    const { m, e, vz } = br;
+    let text;
+    if (e >= 0) {
+      text = (m << BigInt(e)).toString();
+    } else {
+      const k = -e;
+      const zaehler = m * (5n ** BigInt(k));             // m/2^k = m·5^k/10^k
+      let s = zaehler.toString().padStart(k + 1, "0");
+      const ganz = s.slice(0, s.length - k);
+      let bruch = s.slice(s.length - k).replace(/0+$/, "");
+      text = bruch ? ganz + "," + bruch : ganz;
+    }
+    return (vz ? "−" : "") + text;
+  }
+
+  // Nachbar: ein Bitmuster weiter. Über die Vorzeichengrenze hinweg von Hand.
+  function nachbar(x, richtung) {
+    if (Number.isNaN(x)) return x;
+    if (x === 0) return richtung > 0 ? zahlVon(1n) : -zahlVon(1n);
+    const b = bitsVon(x);
+    const auf = (x > 0) === (richtung > 0);
+    return zahlVon(auf ? b + 1n : b - 1n);
+  }
+  const ulpVon = (x) => {
+    if (!Number.isFinite(x)) return NaN;
+    const a = Math.abs(x);
+    const o = nachbar(a, 1);
+    // Am oberen Rand ist der Nachbar unendlich — dann gilt der Abstand nach unten.
+    return Number.isFinite(o) ? o - a : a - nachbar(a, -1);
+  };
+
+  /* ======================= Anzeige =======================  */
+  let X = 0.1;
+
+  function bitfeldBauen() {
+    const host = $("bitfeld");
+    host.textContent = "";
+    for (let i = 63; i >= 0; i--) {
+      const d = document.createElement("div");
+      d.className = "bit " + (i === 63 ? "vz" : i >= 52 ? "exp" : "man");
+      d.dataset.i = i;
+      d.title = "Bit " + i + " umschalten";
+      d.addEventListener("click", () => {
+        X = zahlVon(bitsVon(X) ^ (1n << BigInt(i)));
+        $("eingabe").value = String(X);
+        zeichnen();
+      });
+      host.append(d);
+    }
+  }
+
+  function zeichnen() {
+    const { bits: b, vz, exp, man } = zerlegen(X);
+    const host = $("bitfeld");
+    for (const d of host.children) {
+      const i = +d.dataset.i;
+      const an = (b >> BigInt(i)) & 1n;
+      d.textContent = an ? "1" : "0";
+      d.classList.toggle("ein", !!an);
+    }
+
+    const besonders =
+      exp === 0x7FF ? (man === 0n ? (vz ? "negativ unendlich" : "unendlich") : "keine Zahl (NaN)")
+      : exp === 0 ? (man === 0n ? (vz ? "negative Null" : "Null") : "subnormal")
+      : "normal";
+    $("deutung").textContent = besonders;
+
+    $("felderwerte").innerHTML =
+      "Exponent roh <b>" + exp + "</b>" +
+      (exp === 0x7FF ? "" : " → <b>" + (exp === 0 ? -1022 : exp - 1023) + "</b>");
+
+    $("w-wert").textContent = Object.is(X, -0) ? "−0" : String(X);
+    $("w-teile").textContent = vz + " · " + exp + " · " + man.toString();
+
+    const br = alsBruch(X);
+    $("w-bruch").textContent = br
+      ? (br.vz ? "−" : "") + br.m.toString() + " × 2^" + br.e
+      : "—";
+
+    const u = ulpVon(X);
+    $("w-ulp").textContent = Number.isFinite(u) ? (u === 0 ? "0" : u.toExponential(4)) : "—";
+
+    zeigeExakt();
+    zeichneKarte();
+  }
+
+  function zeigeExakt() {
+    const kasten = $("exakt");
+    const ex = exaktDezimal(X);
+    if (ex === null) {
+      kasten.textContent = "Für " + String(X) + " gibt es keinen Zahlenwert — das Bitmuster steht für einen Sonderfall.";
+      $("exakt-lage").textContent = "Sonderfall";
+      $("exakt-fuss").textContent = "";
+      return;
+    }
+    const eingetippt = $("eingabe").value.trim();
+    const kurz = String(X);
+    // Wo hört die kurze Anzeige auf, und was steht danach wirklich?
+    const kurzNorm = kurz.replace(".", ",").replace("-", "−");
+    let html;
+    if (ex.startsWith(kurzNorm) && ex.length > kurzNorm.length) {
+      html = '<span class="gleich">' + kurzNorm + '</span><span class="rest">' + ex.slice(kurzNorm.length) + "</span>";
+    } else {
+      html = '<span class="gleich">' + ex + "</span>";
+    }
+    kasten.innerHTML = html;
+    $("exakt-lage").textContent = ex.replace("−", "").replace(",", "").length + " Ziffern";
+
+    let fuss = "Blau ist das, was der Browser anzeigt — rot der Rest, der ebenfalls in den Bits steht.";
+    if (/^-?\d*[.,]?\d+(e[-+]?\d+)?$/i.test(eingetippt)) {
+      const eingabeExakt = dezimalAlsBruch(eingetippt);
+      if (eingabeExakt) {
+        const gespeichert = alsBruch(X);
+        if (gespeichert) {
+          // Differenz exakt: eingabe (p/q) gegen gespeichert (m·2^e)
+          const gz = gespeichert.vz ? -gespeichert.m : gespeichert.m;
+          const e = gespeichert.e;
+          let zaehlerG, nennerG;
+          if (e >= 0) { zaehlerG = gz * (2n ** BigInt(e)); nennerG = 1n; }
+          else { zaehlerG = gz; nennerG = 2n ** BigInt(-e); }
+          const diffZ = zaehlerG * eingabeExakt.n - eingabeExakt.z * nennerG;
+          const diffN = nennerG * eingabeExakt.n;
+          fuss += diffZ === 0n
+            ? " Die eingetippte Zahl ist exakt darstellbar — hier gibt es keine Abweichung."
+            : " Gegenüber der eingetippten Zahl weicht der gespeicherte Wert um " +
+              (Number(diffZ) / Number(diffN)).toExponential(3) + " ab.";
+        }
+      }
+    }
+    $("exakt-fuss").textContent = fuss;
+  }
+
+  // Dezimaltext als exakter Bruch z/n — für den Vergleich mit dem Gespeicherten
+  function dezimalAlsBruch(text) {
+    const t = text.trim().replace(",", ".");
+    const m = /^(-?)(\d*)(?:\.(\d*))?(?:[eE]([-+]?\d+))?$/.exec(t);
+    if (!m) return null;
+    const vz = m[1] === "-" ? -1n : 1n;
+    const ganz = m[2] || "0", bruch = m[3] || "", exp = m[4] ? parseInt(m[4], 10) : 0;
+    let z = BigInt(ganz + bruch) * vz;
+    let n = 10n ** BigInt(bruch.length);
+    if (exp > 0) z *= 10n ** BigInt(exp); else if (exp < 0) n *= 10n ** BigInt(-exp);
+    return { z, n };
+  }
+
+  /* ======================= Wo die Zahlen sitzen ======================= */
+  function zeichneKarte() {
+    const c = $("karte"), g = c.getContext("2d");
+    const F = getComputedStyle(document.documentElement);
+    const farbe = (n) => F.getPropertyValue(n).trim();
+    const W = c.width, H = c.height;
+    g.clearRect(0, 0, W, H);
+    g.fillStyle = farbe("--tief"); g.fillRect(0, 0, W, H);
+
+    const art = $("karte-art").value;
+    if (art === "dichte") karteDichte(g, W, H, farbe);
+    else karteStrahl(g, W, H, farbe);
+  }
+
+  function karteDichte(g, W, H, farbe) {
+    // Für jede Oktave 2^k .. 2^(k+1): der Abstand zweier Nachbarn.
+    const von = -30, bis = 60;
+    const rand = { l: 58, r: 18, o: 18, u: 34 };
+    const bx = (k) => rand.l + (k - von) / (bis - von) * (W - rand.l - rand.r);
+    const by = (lg) => H - rand.u - (lg + 60) / 80 * (H - rand.o - rand.u);
+
+    g.strokeStyle = farbe("--linie"); g.lineWidth = 1;
+    g.fillStyle = farbe("--leise");
+    g.font = "11px ui-monospace, monospace";
+    for (let lg = -60; lg <= 20; lg += 20) {
+      const y = by(lg);
+      g.beginPath(); g.moveTo(rand.l, y); g.lineTo(W - rand.r, y); g.stroke();
+      g.fillText("1e" + lg, 6, y + 4);
+    }
+    for (let k = von; k <= bis; k += 10) {
+      const x = bx(k);
+      g.fillText("2^" + k, x - 12, H - 12);
+    }
+
+    // Die Treppe der Abstände
+    g.strokeStyle = farbe("--akzent"); g.lineWidth = 2; g.beginPath();
+    for (let k = von; k <= bis; k++) {
+      const wert = Math.pow(2, k);
+      const abstand = ulpVon(wert);
+      const y = by(Math.log10(abstand));
+      const x = bx(k);
+      if (k === von) g.moveTo(x, y); else g.lineTo(x, y);
+    }
+    g.stroke();
+
+    // Die Linie, ab der ganze Zahlen Lücken bekommen
+    const y1 = by(0);
+    g.strokeStyle = farbe("--warn"); g.setLineDash([5, 4]); g.lineWidth = 1.5;
+    g.beginPath(); g.moveTo(rand.l, y1); g.lineTo(W - rand.r, y1); g.stroke();
+    g.setLineDash([]);
+    g.fillStyle = farbe("--warn");
+    g.fillText("Abstand = 1 · ab hier fehlen ganze Zahlen (2^53)", bx(53) - 300, y1 - 8);
+
+    // Die aktuelle Zahl einzeichnen
+    if (Number.isFinite(X) && X !== 0) {
+      const k = Math.floor(Math.log2(Math.abs(X)));
+      if (k >= von && k <= bis) {
+        const x = bx(k), y = by(Math.log10(ulpVon(Math.abs(X))));
+        g.fillStyle = farbe("--eins");
+        g.beginPath(); g.arc(x, y, 4.5, 0, Math.PI * 2); g.fill();
+        g.fillText(String(X), Math.min(x + 8, W - 160), y - 8);
+      }
+    }
+    $("karte-fuss").textContent =
+      "Senkrecht der Abstand zweier benachbarter Zahlen, waagrecht die Größenordnung. " +
+      "Jede Oktave verdoppelt den Abstand — die gerade Linie im logarithmischen Bild ist genau das.";
+  }
+
+  function karteStrahl(g, W, H, farbe) {
+    const rand = { l: 24, r: 24 };
+    const mitte = H / 2;
+    if (!Number.isFinite(X)) {
+      g.fillStyle = farbe("--leise");
+      g.font = "13px ui-monospace, monospace";
+      g.fillText("Für diesen Wert gibt es keine Nachbarn.", rand.l, mitte);
+      $("karte-fuss").textContent = "";
+      return;
+    }
+    const N = 16;                       // Nachbarn links und rechts
+    const punkte = [];
+    let p = X;
+    for (let i = 0; i < N; i++) { p = nachbar(p, -1); punkte.unshift(p); }
+    punkte.push(X);
+    p = X;
+    for (let i = 0; i < N; i++) { p = nachbar(p, 1); punkte.push(p); }
+
+    g.strokeStyle = farbe("--linie"); g.lineWidth = 1;
+    g.beginPath(); g.moveTo(rand.l, mitte); g.lineTo(W - rand.r, mitte); g.stroke();
+
+    g.font = "11px ui-monospace, monospace";
+    punkte.forEach((v, i) => {
+      const x = rand.l + i / (punkte.length - 1) * (W - rand.l - rand.r);
+      const ist = i === N;
+      g.strokeStyle = ist ? farbe("--eins") : farbe("--null");
+      g.lineWidth = ist ? 2 : 1;
+      g.beginPath(); g.moveTo(x, mitte - (ist ? 26 : 12)); g.lineTo(x, mitte + (ist ? 26 : 12)); g.stroke();
+      if (ist || i === 0 || i === punkte.length - 1) {
+        g.fillStyle = ist ? farbe("--eins") : farbe("--leise");
+        const t = String(v);
+        g.fillText(t, Math.max(2, Math.min(x - t.length * 3, W - t.length * 6)), mitte + (ist ? 48 : 34));
+      }
+    });
+
+    const u = ulpVon(X);
+    $("karte-fuss").textContent =
+      "Zwischen zwei Strichen gibt es nichts — das ist der ganze Vorrat. Hier beträgt der " +
+      "Abstand " + (u === 0 ? "0" : u.toExponential(4)) + "; die Zahl in der Mitte ist die gewählte.";
+  }
+
+  /* ======================= Summieren =======================
+     Die Reihenfolge entscheidet. Verglichen wird gegen die exakte Summe, die
+     als Bruch mit gemeinsamem Nenner 2^k mitgeführt wird — kein besserer
+     Fließkommawert, sondern der wahre. */
+
+  function summanden(fall) {
+    const a = [];
+    if (fall === "zehntel") { for (let i = 0; i < 1e6; i++) a.push(0.1); }
+    else if (fall === "harmonisch") { for (let i = 1; i <= 1e6; i++) a.push(1 / i); }
+    else if (fall === "gross-klein") { a.push(1e16); for (let i = 0; i < 1e6; i++) a.push(1); }
+    else { for (let i = 0; i < 5e5; i++) { a.push(1e12); a.push(0.001); } }
+    return a;
+  }
+
+  const naiv = (a) => { let s = 0; for (let i = 0; i < a.length; i++) s += a[i]; return s; };
+
+  function kahan(a) {                     // mitgeführter Rest, der sonst verlorengeht
+    let s = 0, rest = 0;
+    for (let i = 0; i < a.length; i++) {
+      const y = a[i] - rest;
+      const t = s + y;
+      rest = (t - s) - y;
+      s = t;
+    }
+    return s;
+  }
+
+  function paarweise(a, von, bis) {       // teile und herrsche: kürzere Ketten, kleinerer Fehler
+    if (bis === undefined) { von = 0; bis = a.length; }
+    const n = bis - von;
+    if (n <= 128) { let s = 0; for (let i = von; i < bis; i++) s += a[i]; return s; }
+    const m = von + (n >> 1);
+    return paarweise(a, von, m) + paarweise(a, m, bis);
+  }
+
+  // Exakte Summe: jeden Summanden als m·2^e auf den kleinsten Exponenten bringen
+  function exakteSumme(a) {
+    let eMin = 0, erst = true;
+    for (const v of a) {
+      const b = alsBruch(v);
+      if (!b) continue;
+      if (erst || b.e < eMin) { eMin = b.e; erst = false; }
+    }
+    let summe = 0n;
+    for (const v of a) {
+      const b = alsBruch(v);
+      if (!b) continue;
+      const m = b.vz ? -b.m : b.m;
+      summe += m << BigInt(b.e - eMin);
+    }
+    return { m: summe, e: eMin };
+  }
+
+  // Abweichung eines Fließkommawerts von der exakten Summe, gemessen in ULP
+  function fehlerInUlp(wert, exakt) {
+    const b = alsBruch(wert);
+    if (!b) return Infinity;
+    const mW = b.vz ? -b.m : b.m;
+    const e = Math.min(b.e, exakt.e);
+    const diff = (mW << BigInt(b.e - e)) - (exakt.m << BigInt(exakt.e - e));
+    if (diff === 0n) return 0;
+    const u = ulpVon(wert);
+    if (!Number.isFinite(u) || u === 0) return Infinity;
+    // |diff| · 2^e / ulp
+    const betrag = diff < 0n ? -diff : diff;
+    return Number(betrag) * Math.pow(2, e) / u;
+  }
+
+  function summeRechnen() {
+    const fall = $("sum-fall").value;
+    const a = summanden(fall);
+    const exakt = exakteSumme(a);
+    const verfahren = [
+      ["naiv, der Reihe nach", naiv(a)],
+      ["paarweise", paarweise(a)],
+      ["Kahan", kahan(a)],
+      ["sortiert, klein zuerst", naiv(a.slice().sort((x, y) => Math.abs(x) - Math.abs(y)))]
+    ];
+    const tb = $("sum-tabelle").querySelector("tbody");
+    tb.textContent = "";
+    let besterFehler = Infinity;
+    const zeilen = verfahren.map(([name, wert]) => {
+      const f = fehlerInUlp(wert, exakt);
+      if (f < besterFehler) besterFehler = f;
+      return { name, wert, f };
+    });
+    for (const z of zeilen) {
+      const tr = document.createElement("tr");
+      const genau = z.f === 0;
+      tr.innerHTML = "<td>" + z.name + "</td><td>" + String(z.wert) + "</td>" +
+        "<td class='z " + (genau ? "gut" : z.f === besterFehler ? "gut" : "schlecht") + "'>" +
+        (genau ? "exakt" : nf.format(Math.round(z.f))) + "</td>";
+      tb.append(tr);
+    }
+    $("sum-fuss").textContent =
+      "Summanden: " + nf.format(a.length) + " · Vergleichswert ist die mit BigInt exakt gerechnete " +
+      "Summe, der Fehler in Vielfachen des Abstands zum Nachbarn.";
+  }
+
+  /* ======================= Beweis statt Behauptung ======================= */
+  function zufallsBits(rnd) {
+    // gleichverteilt über die Bitmuster, aber ohne NaN/Unendlich
+    let b;
+    do { b = (BigInt(Math.floor(rnd() * 0x100000000)) << 32n) | BigInt(Math.floor(rnd() * 0x100000000)); }
+    while (((b & EXP_MASKE) >> 52n) === 0x7FFn);
+    return b;
+  }
+  function mulberry32(seed) {
+    let t = seed >>> 0;
+    return function () {
+      t += 0x6D2B79F5;
+      let r = Math.imul(t ^ (t >>> 15), 1 | t);
+      r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+      return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  let pruefeLaeuft = false;
+  async function pruefen() {
+    if (pruefeLaeuft) return;
+    pruefeLaeuft = true; $("b-pruefen").disabled = true;
+    const tb = $("pruef-tabelle").querySelector("tbody");
+    tb.textContent = "";
+    const t0 = performance.now();
+    const rnd = mulberry32(20260814);
+    let fehler = 0;
+
+    const zeile = (was, umfang, gut, text) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = "<td>" + was + "</td><td>" + umfang + "</td><td style='color:" +
+        (gut ? "var(--akzent)" : "var(--warn)") + "'>" + text + "</td>";
+      tb.append(tr);
+    };
+
+    // 1. Rundreise: exakte Dezimalzahl zurücklesen muss dasselbe Bitmuster ergeben
+    let f1 = 0;
+    const N1 = 20000;
+    for (let i = 0; i < N1; i++) {
+      const b = zufallsBits(rnd);
+      const x = zahlVon(b);
+      const ex = exaktDezimal(x);
+      if (ex === null) continue;
+      const zurueck = Number(ex.replace("−", "-").replace(",", "."));
+      if (bitsVon(zurueck) !== b) f1++;
+      if ((i & 2047) === 0) { $("pruef-balken").style.width = (100 * i / N1 / 3).toFixed(1) + "%"; await new Promise(r => setTimeout(r, 0)); }
+    }
+    fehler += f1;
+    zeile("Exakte Darstellung", nf.format(N1) + " Bitmuster", f1 === 0,
+      f1 === 0 ? "liest sich verlustfrei zurück" : f1 + " Abweichungen");
+
+    // 2. Nachbarschaft: genau ein Bitmuster Abstand, und ULP passt zur Differenz
+    let f2 = 0;
+    const N2 = 20000;
+    for (let i = 0; i < N2; i++) {
+      const b = zufallsBits(rnd);
+      const x = zahlVon(b);
+      if (!Number.isFinite(x) || x === 0) continue;
+      const hoch = nachbar(x, 1), runter = nachbar(x, -1);
+      if (!(runter < x && x < hoch)) { f2++; continue; }
+      if (Number.isFinite(hoch) && Math.abs(hoch - x) !== ulpVon(x) && Math.abs(x) > 0) {
+        // beim Sprung über eine Zweierpotenz ist der Abstand nach oben größer — zulässig
+        const u = ulpVon(x);
+        if (Math.abs(hoch - x) !== 2 * u && Math.abs(hoch - x) !== u) f2++;
+      }
+      if ((i & 2047) === 0) { $("pruef-balken").style.width = (33 + 100 * i / N2 / 3).toFixed(1) + "%"; await new Promise(r => setTimeout(r, 0)); }
+    }
+    fehler += f2;
+    zeile("Nachbarn", nf.format(N2) + " Bitmuster", f2 === 0,
+      f2 === 0 ? "genau ein Muster entfernt, Abstand stimmt" : f2 + " Abweichungen");
+
+    // 3. Exakte Summe gegen schrittweise Bruchsumme
+    let f3 = 0;
+    const N3 = 400;
+    for (let i = 0; i < N3; i++) {
+      const laenge = 3 + Math.floor(rnd() * 12);
+      const a = [];
+      for (let k = 0; k < laenge; k++) a.push(zahlVon(zufallsBits(rnd)));
+      const exakt = exakteSumme(a);
+      // Gegenprobe: Brüche einzeln auf gemeinsamen Nenner, unabhängig gerechnet
+      let z = 0n, e = 0, erst = true;
+      for (const v of a) {
+        const b = alsBruch(v);
+        if (!b) continue;
+        const m = b.vz ? -b.m : b.m;
+        if (erst) { z = m; e = b.e; erst = false; continue; }
+        if (b.e < e) { z = z << BigInt(e - b.e); e = b.e; z += m; }
+        else { z += m << BigInt(b.e - e); }
+      }
+      const links = exakt.m << BigInt(Math.max(0, exakt.e - e));
+      const rechts = z << BigInt(Math.max(0, e - exakt.e));
+      if (links !== rechts) f3++;
+      if ((i & 63) === 0) { $("pruef-balken").style.width = (66 + 100 * i / N3 / 3).toFixed(1) + "%"; await new Promise(r => setTimeout(r, 0)); }
+    }
+    fehler += f3;
+    zeile("Exakte Summe", nf.format(N3) + " Reihen", f3 === 0,
+      f3 === 0 ? "stimmt mit der Gegenrechnung überein" : f3 + " Abweichungen");
+
+    // 4. Kahan darf nie schlechter sein als naiv
+    let f4 = 0;
+    const faelle = ["zehntel", "harmonisch", "gross-klein", "wechsel"];
+    for (const fall of faelle) {
+      const a = summanden(fall);
+      const ex = exakteSumme(a);
+      if (fehlerInUlp(kahan(a), ex) > fehlerInUlp(naiv(a), ex)) f4++;
+    }
+    fehler += f4;
+    zeile("Kahan gegen naiv", faelle.length + " Reihen", f4 === 0,
+      f4 === 0 ? "nie schlechter" : f4 + "× schlechter");
+
+    $("pruef-balken").style.width = "100%";
+    $("pruef-fuss").textContent = fehler === 0
+      ? nf.format(N1 + N2 + N3 + faelle.length) + " Fälle geprüft, kein einziger falsch · " +
+        ((performance.now() - t0) / 1000).toFixed(1) + " s"
+      : fehler + " FALSCHE FÄLLE";
+    $("b-pruefen").disabled = false; pruefeLaeuft = false;
+  }
+
+  /* ======================= Bedienung ======================= */
+  function uebernehmen() {
+    const t = $("eingabe").value.trim();
+    const v = t === "" ? 0 : Number(t.replace(",", "."));
+    X = Number.isNaN(v) && !/^nan$/i.test(t) ? X : v;
+    zeichnen();
+  }
+
+  $("b-setzen").addEventListener("click", uebernehmen);
+  $("eingabe").addEventListener("keydown", (e) => { if (e.key === "Enter") uebernehmen(); });
+  $("vorlagen").addEventListener("change", () => {
+    $("eingabe").value = $("vorlagen").value;
+    uebernehmen();
+  });
+  $("b-hoch").addEventListener("click", () => { X = nachbar(X, 1); $("eingabe").value = String(X); zeichnen(); });
+  $("b-runter").addEventListener("click", () => { X = nachbar(X, -1); $("eingabe").value = String(X); zeichnen(); });
+  $("karte-art").addEventListener("change", zeichneKarte);
+  $("b-summe").addEventListener("click", summeRechnen);
+  $("b-pruefen").addEventListener("click", pruefen);
+  $("b-thema").addEventListener("click", () => {
+    const jetzt = document.documentElement.getAttribute("data-theme");
+    const dunkelSystem = matchMedia("(prefers-color-scheme: dark)").matches;
+    const neu = jetzt ? (jetzt === "dark" ? "light" : "dark") : (dunkelSystem ? "light" : "dark");
+    document.documentElement.setAttribute("data-theme", neu);
+    zeichneKarte();
+  });
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", zeichneKarte);
+
+  bitfeldBauen();
+  zeichnen();
+})();
+</script>
+</body>
+</html>
