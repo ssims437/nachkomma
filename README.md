@@ -131,4 +131,5 @@ Verwandt: [Plotterblätter](https://github.com/ssims437/plotterblaetter) ·
 [Redundanz](https://github.com/ssims437/redundanz) ·
 [Reparatur](https://github.com/ssims437/reparatur) ·
 [Würfel](https://github.com/ssims437/wuerfel) ·
-[Rechenwerk](https://github.com/ssims437/rechenwerk)
+[Rechenwerk](https://github.com/ssims437/rechenwerk) ·
+[Zeitsprung](https://github.com/ssims437/zeitsprung)
