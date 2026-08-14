@@ -132,4 +132,5 @@ Verwandt: [Plotterblätter](https://github.com/ssims437/plotterblaetter) ·
 [Reparatur](https://github.com/ssims437/reparatur) ·
 [Würfel](https://github.com/ssims437/wuerfel) ·
 [Rechenwerk](https://github.com/ssims437/rechenwerk) ·
-[Zeitsprung](https://github.com/ssims437/zeitsprung)
+[Zeitsprung](https://github.com/ssims437/zeitsprung) ·
+[Gradtage](https://github.com/ssims437/gradtage)
