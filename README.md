@@ -133,4 +133,5 @@ Verwandt: [Plotterblätter](https://github.com/ssims437/plotterblaetter) ·
 [Würfel](https://github.com/ssims437/wuerfel) ·
 [Rechenwerk](https://github.com/ssims437/rechenwerk) ·
 [Zeitsprung](https://github.com/ssims437/zeitsprung) ·
-[Gradtage](https://github.com/ssims437/gradtage)
+[Gradtage](https://github.com/ssims437/gradtage) ·
+[Stimmführung](https://github.com/ssims437/stimmfuehrung)
